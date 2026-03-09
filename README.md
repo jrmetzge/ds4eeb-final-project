@@ -1,11 +1,20 @@
 # ds4eeb-final-project
-identify an ecology or evolutionary biology question to investigate, dataset(s) to use for the project, visualizations and brms statistical analyses to create, and an audience of your choosing to target your communication
-The components of the final project include a GitHub repository with: 
 
-1. The motivating question, the rationale for the question, and sufficient background information to understand why the question is interesting and important
-2. Data wrangling and analyses done in R
-3. GitHub repository, scripts, and data organized and documented with metadata
-4. Target audience identified
-5. Raw dataset(s), scripts, statistical outputs from brms, and visualizations from throughout the process
-6. All analysis steps and choices are documented with code and comments so that it the analysis is transparent and reproducible
-7. Rendered Quarto document with code that presents the exploratory and explanatory data analysis phases through text, figures, and statistical and numerical analyses. If you prefer, the exploratory and explanatory phases can be presented in separate documents, with the explanatory document tailored for your target audience communication.
+## 🚀 Usage
+
+This projects code is public and open to use. However, permission must be sought before using or publishing any project data.
+
+## ✉️ Contact Info
+
+Kroeker lab, UCSC contributing PhD students:
+
+Jake Metzger jrmetzge@ucsc.edu - primary contact
+Niki Sridhar
+Haleigh Yang
+
+## ℹ️ Project Overview
+
+This repo was for our final roject for our winter 2026 quater class - data science from ecology and evolutionary biology. The goal was identify an ecology or evolutionary biology question to investigate, find dataset(s) to use for the project, create visualizations and brms statistical analyses , and identify a target audience.
+
+We chose to investigate changes in so kelp forest community data collected by our lab. Specifically, asking if, and what, impact the transition of many sites from kelp forests to urchin barrens have had for abalone populations. 
+Our multivariate brms model included pycnopodia, urchins, algae (both canopy and understory) and abalone. It included spatial and temporal random effects.

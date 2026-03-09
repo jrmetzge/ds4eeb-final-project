@@ -1,0 +1,533 @@
+---
+title: "ds4eeb Final Project"
+author: "Jake Metzger, Niki Shridar, Haleigh Yang"
+date: today
+format: pdf
+editor: visual
+---
+
+In this script we are going to analyzing data from the Kroeker Labs annual surveys of rocky subtidal reef communites near Sitka, Alaska. Over the past few years, we have seen the transition of these reefs from kelp forests to urchin barrens, and the loss of abalone populations. So the motivating questions here are:
+
+Quantitatively, can we see these trends in our data?
+
+-And-
+
+What is the relationship between urchin and abalone populations?
+
+Our target audience is the general public and scientific community as we plan to share these results (after some refinement) with the community of Sitka, the scientific community, and, perhaps, resource managers.
+
+Note: we are only using data from summer surveys, as winter data may obscure our results due to the seasonal fluctuations in algal and fauna communities. So, let's start loading some libraries and read in the data:\
+\
+\
+
+## Loading libraries
+
+```{r}
+#| message: false
+#| warning: false
+library(tidyverse)
+library(janitor)
+library(here)
+library(readr)
+library(purrr)
+library(scales)
+library(lubridate)
+library(RColorBrewer)
+library(brms) # for statistics
+library(dagitty) # for loading DAGs
+library(patchwork)
+library(tidybayes)
+```
+
+## Reading and plotting the data
+
+```{r}
+#| message: false
+#| warning: false
+
+swath_density <- read_csv(here("data/swath_density.csv")) %>% 
+  mutate(
+    transect = as.character(transect),
+    transect = as.numeric(case_when(
+      transect == "upcoast"   ~ "1",
+      transect == "downcoast" ~ "2",
+      TRUE ~ transect
+    )),
+    zone = recode(zone, "perm" = "deep")
+  ) %>% 
+  filter(zone != "mid", season == "summer") %>%  # filter out odd zone code, and only include summer data
+  select(-season) #remove season column as only using summer data
+
+swath_size_freq <- read_csv(here("data/swath_size_freq.csv")) %>% 
+  mutate(
+    transect = as.character(transect),
+    transect = as.numeric(case_when(
+      transect == "upcoast"   ~ "1",
+      transect == "downcoast" ~ "2",
+      TRUE ~ transect
+    )),
+    zone = recode(zone, "perm" = "deep")
+  ) %>% 
+  filter(zone != "mid", segment != "all", season == "summer") %>%  # filter out odd zone and segment codes, and only include summer data
+  select(-season)
+
+# make key of all real sampling events to fill zeros later
+sampling_key <- swath_size_freq %>%
+  distinct(year, site, zone, transect, segment)
+
+```
+
+### Abalone biomass data
+
+Using the equation W = 0.0000578L\^3.2 from Zhang et al 2007 to convert shell length (L in mm) into body weight (W in g). The two parameter values were the means estimated by Breen & Adkins (1982).
+
+Citation: Zhang, Z., Campbell, A., & Lessard, J. (2007). Modeling northern abalone, Haliotis kamtschatkana, population stock and recruitment in British Columbia. Journal of Shellfish Research, 26(4), 1099-1107.
+
+Pull in swath size frequency data, filter for abalone, sum at the segment level, calculate average biomass density (g/m\^2) at the transect level for plotting.
+
+```{r}
+ab_biodensity_segment <- swath_size_freq %>% 
+  filter(classcode == "halkam") %>% #filter for abalone
+  mutate(biomass_g = 0.0000578 * size_or_stipe_count^3.2) %>%
+  group_by(year, site, zone, transect, segment) %>%
+  summarise(
+    biomass_density = sum(biomass_g, na.rm = TRUE) / 20,
+    .groups = "drop"
+  ) %>%
+  right_join(sampling_key, by = c("year", "site", "zone", "transect", "segment")) %>%
+  mutate(biomass_density = replace_na(biomass_density, 0))
+
+ab_biodensity_transect <- ab_biodensity_segment%>%
+  group_by(year, site, zone, transect) %>%
+  summarise(mean_biomass_density = mean(biomass_density, na.rm = TRUE), .groups = "drop")
+```
+
+### Plotting Abalone
+
+```{r}
+ggplot(ab_biodensity_transect, 
+       aes(x = year, y = mean_biomass_density, color = zone)) +
+  geom_point() +
+  geom_smooth() 
+```
+
+### Macro biomass density
+
+**Constants for macro from Lauren Bell's paper:** macro_wet_slope \<- 734.9 macro_dry_slope \<- 0.103 survey_area_m2 \<- 30 \* 2 \# 60m² segment_area_m2 \<- survey_area_m2 / 3 \# 20m²
+
+```{r}
+
+macro_wet_slope <- 734.9 
+macro_dry_slope <- 0.103 
+#transect_area_m2 <- 20 * 3 # 60m² 
+#segment_area_m2 <- 10 * 2 # 20m²
+
+macro_biodensity_segment <- swath_size_freq %>% 
+  filter(classcode == "macpyrad") %>%
+  mutate(dry_mass_g_plant = size_or_stipe_count * macro_wet_slope * macro_dry_slope) %>%
+  group_by(year, site, zone, transect, segment) %>%
+  summarise(
+    biomass_density = (sum(dry_mass_g_plant, na.rm = TRUE) / 20),
+    .groups = "drop"
+  ) %>%
+  right_join(sampling_key, by = c("year", "site", "zone", "transect", "segment")) %>%
+  mutate(biomass_density = replace_na(biomass_density, 0))
+  
+macro_biodensity_transect <- macro_biodensity_segment %>%   
+  group_by(year, site, zone, transect) %>%
+  summarise(mean_biomass_density = mean(biomass_density, na.rm = TRUE), .groups = "drop") 
+```
+
+### Plotting Macrocystis
+
+```{r}
+ggplot(macro_biodensity_transect, 
+       aes(x = year, y = mean_biomass_density, color = zone)) +
+  geom_smooth(alpha = 0.6) +
+  geom_point(size = 2, alpha = 0.7) +
+  #facet_wrap(~ site, scales = "free_y") +
+  labs(
+    x = "Year",
+    y = "Frond Standing Crop (g/m²)",
+    title = "Kelp Dry Mass Across Years by Site") +
+  theme_classic()
+```
+
+### Urchin Data
+
+converting test diameter to biomass
+
+Conversion factors from Lochead, J., W. Hajas, and Don Leus. Calculation of mean abundance in the Red Urchin Analysis Program and Green Urchin Analysis Program. Fisheries and Oceans Canada, Science Branch, Pacific Region, Pacific Biological Station, 2015.
+
+Reds (and using for purps): W = 0.0010169 × T\^2.7787 Greens: W = 11.2181 × (T/30)\^2.754085
+
+```{r}
+
+custom_colors <- c("Green Urchin" = "#90ee90",
+                   "Red Urchin" = "red")
+              
+
+urch_biodensity_segment_species <- swath_size_freq %>%
+  filter(classcode %in% c("strdro","strfraad")) %>%
+  filter(size_or_stipe_count < 150) %>% #removing outliers
+  mutate(
+    common_name = case_when(classcode == "strdro" ~ "Green Urchin",
+                                 classcode == "strfraad" ~ "Red Urchin"),
+    site = case_when(site == "Breast" ~ "BREAST", #cleaning
+                          site == "Harris" ~ "HARRIS",
+                          .default = site),
+    biomass_density = case_when(
+      classcode == "strdro" ~ 11.2181 * (size_or_stipe_count / 30)^2.754085,
+      classcode %in% c("strfraad") ~ 0.0010169 * size_or_stipe_count^2.7787,
+    TRUE ~ NA_real_
+  )) %>% 
+  # summing at the segment level by species and divide by area sampled
+  group_by(year, site, zone, transect, segment, common_name) %>%
+  summarise(biomass_density= sum(biomass_density, na.rm = TRUE) / first(area_samp),
+            .groups = "drop") %>% 
+  right_join(sampling_key, by = c("year", "site", "zone", "transect", "segment")) %>%
+  mutate(biomass_density = replace_na(biomass_density, 0))
+
+#1: Sum both species within each segment
+urch_biodensity_segment <- urch_biodensity_segment_species %>%
+  group_by(year, site, zone, transect, segment) %>%
+  summarise(biomass_density = sum(biomass_density, na.rm = TRUE), .groups = "drop")
+
+#2: Average segments up to transect level
+urch_biodensity_transect <- urch_biodensity_segment %>%
+  group_by(year, site, zone, transect) %>%
+  summarise(mean_biomass_density = mean(biomass_density, na.rm = TRUE), .groups = "drop")
+```
+
+### Plotting Urchins
+
+```{r}
+       
+ggplot(urch_biodensity_transect, aes(x = year, y = mean_biomass_density, color = zone)) +
+  geom_point() +
+  geom_smooth() +
+  theme_classic() 
+```
+
+### Understory Algae Data
+
+Understory algae is simply density (n/m^2), summed across subcanopy taxa as we do not have biomass conversions for most species.
+
+```{r}
+under_density_segment <- swath_density %>% #reading from density df as we are not converting to biomass
+  filter(class == "algae", !classcode %in% c("macpyrad", "macpyrjv", "unkalg")) %>% #Remove Macrocystis data and unknow algae
+  group_by(year, site, zone, transect, segment) %>%
+  summarise(
+    under_density = (sum(density, na.rm = TRUE)),
+    .groups = "drop"
+  ) %>%
+  right_join(sampling_key, by = c("year", "site", "zone", "transect", "segment")) %>%
+  mutate(under_density = replace_na(under_density, 0)) 
+  
+under_density_transect <- under_density_segment %>% 
+group_by(year, site, zone, transect) %>%
+  summarise(mean_under_density = mean(under_density, na.rm = TRUE), .groups = "drop") 
+```
+
+### Plotting Understory
+
+```{r}
+ggplot(under_density_transect, 
+       aes(x = year, y = mean_under_density, color = zone)) +
+  geom_smooth() +
+  geom_point() +
+  labs(
+    x = "Year",
+    y = "Density (n/m²)",
+    title = "Understory Algal Density Across Years by Zone") +
+  theme_classic()
+```
+
+### Pycno Data
+
+pycno biomass conversion = exp(-3.9989)*(length.cm^3.133)
+
+Lee, L. C., J. C. Watson, R. Trebilco, and A. K. Salomon. 2016. Indirect effects and prey behavior mediate interactions between an endangered prey and recovering predator. Ecosphere 7(12):e01604. 10.1002/ecs2.1604
+
+```{r}
+#Pycno biomass calculations
+
+pyc_biodensity_segment <- swath_size_freq %>%
+  filter(classcode == "pychel") %>%
+  mutate(biomass_g = exp(-3.9989) * (size_or_stipe_count^3.133)) %>%
+  group_by(year, site, zone, transect, segment) %>%
+  summarise(
+    biomass_density = sum(biomass_g, na.rm = TRUE) / 20,
+    .groups = "drop"
+  ) %>%
+  mutate(biomass_density = replace_na(biomass_density, 0))%>%
+  right_join(sampling_key, by = c("year", "site", "zone", "transect", "segment")) %>% 
+  mutate(biomass_density = replace_na(biomass_density, 0))
+
+pyc_biodensity_transect <- pyc_biodensity_segment %>% 
+  group_by(year, site, zone, transect) %>%
+  summarise(mean_biomass_density = mean(biomass_density, na.rm = TRUE), .groups = "drop")
+```
+
+### Plotting Pycno Data
+
+```{r}
+ggplot(pyc_biodensity_transect, 
+       aes(x = year, y = mean_biomass_density, color = zone)) +
+  geom_smooth() +
+  geom_point() +
+  labs(
+    x = "Year",
+    y = "Biomas density (g/m^2)",
+    title = "Pycnopodia Biomass Density Across Years by Zone") +
+  theme_classic()
+```
+
+## Putting it all together
+
+### Combining all data
+
+```{r}
+#at segment level for model
+combined_segments <- bind_rows(
+  ab_biodensity_segment %>%
+    mutate(taxa = "Abalone"),
+  macro_biodensity_segment %>% 
+    mutate(taxa = "Macrocystis"),
+  pyc_biodensity_segment %>% 
+    mutate(taxa = "Pycnopodia"),
+  under_density_segment %>% 
+    rename(biomass_density = under_density) %>% 
+  mutate(taxa = "Understory"),
+  urch_biodensity_segment %>% 
+    mutate(taxa = "Urchins"))
+
+#At transect level for plotting
+combined_transects <- bind_rows(
+  ab_biodensity_transect %>% 
+    mutate(taxa = "Abalone"),
+  macro_biodensity_transect %>% 
+    mutate(taxa = "Macrocystis"),
+  urch_biodensity_transect %>% 
+    mutate(taxa = "Urchins"), 
+  under_density_transect %>% 
+    rename(mean_biomass_density = mean_under_density) %>% 
+    mutate(taxa = "Understory Algae"), 
+  pyc_biodensity_transect %>% 
+    mutate(taxa = "Pycnopodia")
+)
+```
+
+```{r}
+#Normalizing data, max = 1, 0 = 0
+combined_normal0 <- combined_transects %>%
+  group_by(taxa) %>%
+  mutate(mean_scaled = mean_biomass_density / max(mean_biomass_density, na.rm = TRUE)) %>%
+  ungroup()
+```
+### Plotting taxa over time
+```{r}
+taxa_colors <- c(
+  "Urchins"       = "mediumorchid4",
+  "Abalone"          = "#FFB6C1",
+  "Understory Algae" = "yellow3",
+  "Macrocystis"      = "olivedrab3", 
+  "Pycnopodia"  = "lightblue"
+)
+
+ggplot(combined_normal0, aes(x = year, y = mean_scaled, color = taxa, fill = taxa)) +
+  geom_smooth(method = "gam", formula = y ~ s(x, k = 5), se = TRUE, alpha = 0.15) +
+  scale_color_manual(values = taxa_colors) +
+  scale_fill_manual(values = taxa_colors) +
+  coord_cartesian(ylim = c(0, NA)) +
+  labs(x = "Year", y = "Normalized %", color = "Taxa", fill = "Taxa") +
+  theme_classic()
+```
+
+### Plotting urchins against other taxa
+
+### Reformatting data for model
+
+```{r}
+# pivot to wide so each taxa becomes its own column,
+# allowing us to use Urchins as the x variable in the plot
+combined_wide_plot <- combined_transects %>%
+  group_by(year, site, zone, transect, taxa) %>%
+  summarise(mean_biomass_density = mean(mean_biomass_density, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = taxa,
+              values_from = mean_biomass_density)
+
+# pivot back to long but exclude Urchins — it stays as its own column (the x axis)
+combined_long_plot <- combined_wide_plot %>%
+  pivot_longer(cols = c("Abalone", "Macrocystis", "Understory Algae", "Pycnopodia"),
+               names_to = "taxa",
+               values_to = "mean_biomass_density")
+```
+
+### Plotting Urchins V Other Taxa
+
+```{r}
+ggplot(combined_long_plot, aes(x = Urchins, y = mean_biomass_density, color = taxa, fill = taxa)) +
+  geom_point(alpha = 0.4, size = 2) +
+  geom_smooth(method = "gam", formula = y ~ s(x, k = 5), se = TRUE, alpha = 0.15) +
+  scale_x_continuous(
+    trans = "log1p",
+    breaks = c(0, 1, 10, 100, 1000),
+    labels = c("0", "1", "10", "100", "1000")
+  ) +
+  geom_vline(xintercept = c(1, 10, 100, 1000), linetype = "dashed", color = "grey60") +
+  facet_wrap(~ factor(taxa, levels = c("Macrocystis", "Understory Algae", "Abalone", "Pycnopodia")),
+             scales = "free_y",
+             labeller = as_labeller(c(
+               "Macrocystis"      = "Macrocystis (g/m²)",
+               "Understory Algae" = "Understory Algae (n/m²)",
+               "Abalone"          = "Abalone (g/m²)",
+               "Pycnopodia"       = "Pycnopodia (g/m²)"
+             ))) +
+  scale_color_manual(values = taxa_colors) +
+  scale_fill_manual(values = taxa_colors) +
+  coord_cartesian(ylim = c(0, NA)) +
+  labs(x = "Urchin Biomass Density (g/m²), log(x + 1) scale)",
+       y = "Density") +
+  theme_classic(base_size = 13) +
+  theme(
+    legend.position = "none",
+    strip.background = element_blank(),
+    strip.text = element_text(face = "bold"),
+    panel.spacing = unit(1.5, "lines")
+  )
+```
+
+### Our DAG
+
+```{r}
+DAG <- dagitty('dag {
+bb="0,0,1,1"
+Pycnopodia [adjusted,pos="0.100,0.500"]
+Urchins [exposure,pos="0.300,0.500"]
+Macrocystis [pos="0.500,0.350"]
+UnderstoryAlgae [pos="0.500,0.650"]
+Abalone [outcome,pos="0.700,0.500"]
+Macrocystis -> Abalone
+Pycnopodia -> Abalone [pos="0.400,0.300"]
+Pycnopodia -> Urchins
+UnderstoryAlgae -> Abalone
+Urchins -> Macrocystis
+Urchins -> UnderstoryAlgae
+}')
+plot(DAG)
+```
+
+### The BRM Model
+
+```{r}
+#| warning: false
+
+# ------------------------------------------------------------
+# 1. Build modeling dataframe
+# ------------------------------------------------------------
+
+# Pivot wide so each taxa is its own column
+combined_wide_model <- combined_segments %>%
+  pivot_wider(names_from = taxa,
+              values_from = biomass_density) %>%
+  clean_names() %>%  # janitor::clean_names() to handle spaces/caps
+  mutate( site = factor(site),
+    zone = factor(zone),
+    transect = factor(transect),
+    segment = factor(segment),
+    year = factor(year),
+    macrocystis = log1p(macrocystis),
+    understory = log1p(understory),
+    pycnopodia = log1p(pycnopodia),
+    urchins = log1p(urchins)
+  )
+
+# Check structure
+head(combined_wide_model)
+```
+
+```{r}
+# ------------------------------------------------------------
+# 2. Define model formulas (trophic cascade DAG)
+# ------------------------------------------------------------
+
+# Pycnopodia → Urchins
+f_urchins <- bf(
+  urchins ~ pycnopodia +
+    (1 | year) +
+    (1 | site/zone/transect/segment),
+  family = hurdle_gamma()
+)
+
+# Urchins → Macrocystis
+f_macrocystis <- bf(
+  macrocystis ~ urchins +
+    (1 | year) +
+    (1 | site/zone/transect/segment),
+  family = hurdle_gamma()
+)
+
+# Urchins → Understory algae
+f_understory <- bf(
+  understory ~ urchins +
+    (1 | year) +
+    (1 | site/zone/transect/segment),
+  family = hurdle_gamma()
+)
+
+# Kelp + predators → Abalone
+f_abalone <- bf(
+  abalone ~ macrocystis + understory + pycnopodia +
+    (1 | year) +
+    (1 | site/zone/transect/segment),
+  family = hurdle_gamma()
+)
+
+# ------------------------------------------------------------
+# 3. Priors
+# ------------------------------------------------------------
+
+priors <- c(
+  prior(normal(0,1), class = "b"),
+  prior(normal(0,2), class = "Intercept"),
+
+  prior(exponential(1), class = "shape", resp = "urchins"),
+  prior(exponential(1), class = "shape", resp = "macrocystis"),
+  prior(exponential(1), class = "shape", resp = "understory"),
+  prior(exponential(1), class = "shape", resp = "abalone")
+)
+
+# ------------------------------------------------------------
+# 4. Fit multivariate trophic cascade model
+# ------------------------------------------------------------
+
+cascade_model <- brm(
+  f_urchins +
+    f_macrocystis +
+    f_understory +
+    f_abalone +
+    set_rescor(FALSE),
+
+  data = combined_wide_model,
+  prior = priors,
+
+  chains = 4,
+  cores = 4,
+  iter = 4000,
+  warmup = 2000,
+
+  control = list(adapt_delta = 0.95)
+)
+```
+
+```{r}
+# ------------------------------------------------------------
+# 5. Diagnostics
+# ------------------------------------------------------------
+
+summary(cascade_model)
+
+
+plot(cascade_model)
+```
