@@ -9,7 +9,9 @@ This projects code is public and open to use. However, permission must be sought
 Kroeker lab, UCSC contributing PhD students:
 
 Jake Metzger jrmetzge@ucsc.edu - primary contact
+
 Niki Sridhar
+
 Haleigh Yang
 
 ## ℹ️ Project Overview
